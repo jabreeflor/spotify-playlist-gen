@@ -91,6 +91,14 @@ export interface PlaylistOptions {
   vibe?: string;     // Natural language description
   discover?: boolean; // Find new music
   public?: boolean;
+  // Blend feature
+  blendWith?: string[];  // Artist names to blend taste with
+  // Time machine feature
+  birthYear?: number;
+  targetYear?: number;   // Specific year for time machine
+  // Genre deep dive feature
+  genre?: string;
+  deepCuts?: boolean;    // Find obscure tracks in genre
 }
 
 export interface RecommendationParams {

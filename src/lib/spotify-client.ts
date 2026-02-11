@@ -239,6 +239,35 @@ class SpotifyClient {
     const response = await this.request<{ genres: string[] }>('/recommendations/available-genre-seeds');
     return response.genres;
   }
+
+  // Search tracks by year range (for time machine)
+  async searchTracksByYear(year: number, limit = 50): Promise<SpotifyTrack[]> {
+    const response = await this.request<{ tracks: { items: SpotifyTrack[] } }>(
+      `/search?q=year:${year}&type=track&limit=${limit}`
+    );
+    return response.tracks?.items || [];
+  }
+
+  // Get artist by ID
+  async getArtist(artistId: string): Promise<SpotifyArtist> {
+    return this.request<SpotifyArtist>(`/artists/${artistId}`);
+  }
+
+  // Get artist's top tracks
+  async getArtistTopTracks(artistId: string, market = 'US'): Promise<SpotifyTrack[]> {
+    const response = await this.request<{ tracks: SpotifyTrack[] }>(
+      `/artists/${artistId}/top-tracks?market=${market}`
+    );
+    return response.tracks;
+  }
+
+  // Get related artists
+  async getRelatedArtists(artistId: string): Promise<SpotifyArtist[]> {
+    const response = await this.request<{ artists: SpotifyArtist[] }>(
+      `/artists/${artistId}/related-artists`
+    );
+    return response.artists;
+  }
 }
 
 export const spotifyClient = new SpotifyClient();

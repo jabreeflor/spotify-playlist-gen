@@ -1,6 +1,6 @@
 import { spotifyClient } from './spotify-client';
-import { TasteProfile, PlaylistOptions, SpotifyTrack, RecommendationParams } from '../types/spotify';
-import { gatherListeningData, buildTasteProfile } from './taste-analyzer';
+import { TasteProfile, PlaylistOptions, SpotifyTrack, SpotifyArtist, AudioFeatures, RecommendationParams } from '../types/spotify';
+import { gatherListeningData, buildTasteProfile, AnalysisData } from './taste-analyzer';
 import chalk from 'chalk';
 
 // Mood presets - maps mood to target audio features
@@ -189,6 +189,181 @@ function parseVibe(vibe: string): Partial<RecommendationParams> {
   return params;
 }
 
+// Generate a blended playlist combining user's taste with specified artists
+async function generateBlendPlaylist(options: PlaylistOptions, tasteProfile: TasteProfile): Promise<SpotifyTrack[]> {
+  const blendArtists = options.blendWith || [];
+  const artistIds: string[] = [];
+  const artistGenres: string[] = [];
+
+  // Search for each blend artist and collect their IDs and genres
+  for (const artistName of blendArtists) {
+    const searchResults = await spotifyClient.search(artistName, ['artist'], 1);
+    if (searchResults.artists?.items.length) {
+      const artist = searchResults.artists.items[0];
+      artistIds.push(artist.id);
+      artistGenres.push(...artist.genres.slice(0, 3));
+    }
+  }
+
+  if (artistIds.length === 0) {
+    throw new Error('Could not find any of the specified artists to blend with');
+  }
+
+  // Find overlapping genres between user's taste and blend artists
+  const userGenres = tasteProfile.topGenres.map(g => g.genre);
+  const commonGenres = artistGenres.filter(g => 
+    userGenres.some(ug => ug.includes(g) || g.includes(ug))
+  );
+
+  // Get available genre seeds and find matches
+  const availableGenres = await spotifyClient.getAvailableGenres();
+  const validGenreSeeds = [...new Set([...commonGenres, ...artistGenres])]
+    .filter(g => availableGenres.includes(g))
+    .slice(0, 2);
+
+  // Build recommendation params blending user + artists
+  const seedArtists = [
+    ...artistIds.slice(0, 2),
+    ...tasteProfile.topArtistIds.slice(0, 1)
+  ].slice(0, 3);
+
+  const recParams: RecommendationParams = {
+    seed_artists: seedArtists,
+    seed_genres: validGenreSeeds.length > 0 ? validGenreSeeds : undefined,
+    limit: options.trackCount || 30,
+    // Blend the audio features - average between user's taste and moderate values
+    target_energy: (tasteProfile.avgFeatures.energy + 0.6) / 2,
+    target_valence: (tasteProfile.avgFeatures.valence + 0.6) / 2,
+    target_danceability: (tasteProfile.avgFeatures.danceability + 0.6) / 2
+  };
+
+  return spotifyClient.getRecommendations(recParams);
+}
+
+// Generate a time machine playlist based on high school years
+async function generateTimeMachinePlaylist(options: PlaylistOptions, tasteProfile: TasteProfile): Promise<SpotifyTrack[]> {
+  let targetYears: number[] = [];
+
+  if (options.targetYear) {
+    // Single year specified
+    targetYears = [options.targetYear];
+  } else if (options.birthYear) {
+    // Calculate high school years (ages 14-18)
+    const hsStart = options.birthYear + 14;
+    const hsEnd = options.birthYear + 18;
+    for (let year = hsStart; year <= hsEnd; year++) {
+      targetYears.push(year);
+    }
+  } else {
+    throw new Error('Must specify either birthYear or targetYear for time machine');
+  }
+
+  // Limit to valid years
+  const currentYear = new Date().getFullYear();
+  targetYears = targetYears.filter(y => y >= 1950 && y <= currentYear);
+
+  if (targetYears.length === 0) {
+    throw new Error('No valid years to search for');
+  }
+
+  const allTracks: SpotifyTrack[] = [];
+  const trackIds = new Set<string>();
+  const tracksPerYear = Math.ceil((options.trackCount || 30) / targetYears.length);
+
+  // Fetch tracks from each year
+  for (const year of targetYears) {
+    const yearTracks = await spotifyClient.searchTracksByYear(year, tracksPerYear + 20);
+    
+    // Sort by popularity to get the hits from that year
+    const sortedTracks = yearTracks
+      .filter(t => !trackIds.has(t.id))
+      .sort((a, b) => b.popularity - a.popularity)
+      .slice(0, tracksPerYear);
+
+    for (const track of sortedTracks) {
+      trackIds.add(track.id);
+      allTracks.push(track);
+    }
+  }
+
+  // Shuffle to mix years together
+  return allTracks.sort(() => Math.random() - 0.5).slice(0, options.trackCount || 30);
+}
+
+// Generate a genre deep dive playlist with obscure tracks
+async function generateGenreDeepDive(options: PlaylistOptions, tasteProfile: TasteProfile): Promise<SpotifyTrack[]> {
+  const genre = options.genre;
+  if (!genre) {
+    throw new Error('Must specify a genre for deep dive');
+  }
+
+  // Check if genre is available for recommendations
+  const availableGenres = await spotifyClient.getAvailableGenres();
+  const matchedGenre = availableGenres.find(g => 
+    g.toLowerCase() === genre.toLowerCase() ||
+    g.toLowerCase().includes(genre.toLowerCase()) ||
+    genre.toLowerCase().includes(g.toLowerCase())
+  );
+
+  if (!matchedGenre) {
+    // Try to find a related genre
+    const fuzzyMatch = availableGenres.find(g => 
+      g.toLowerCase().split('-').some(part => genre.toLowerCase().includes(part)) ||
+      genre.toLowerCase().split(' ').some(part => g.toLowerCase().includes(part))
+    );
+    
+    if (!fuzzyMatch) {
+      throw new Error(`Genre "${genre}" not available. Try: ${availableGenres.slice(0, 10).join(', ')}...`);
+    }
+  }
+
+  const genreSeed = matchedGenre || genre;
+  const isDeepCuts = options.deepCuts !== false; // Default to deep cuts
+
+  // First get some recommendations in the genre
+  const recParams: RecommendationParams = {
+    seed_genres: [genreSeed],
+    limit: 100, // Get more to filter
+    // For deep cuts, target lower popularity
+    max_popularity: isDeepCuts ? 40 : undefined,
+    // Blend slightly with user's audio preferences
+    target_energy: tasteProfile.avgFeatures.energy,
+    target_valence: tasteProfile.avgFeatures.valence
+  };
+
+  // Also add one user artist seed if they have any in similar genre
+  const userArtistIds = tasteProfile.topArtistIds.slice(0, 3);
+  if (userArtistIds.length > 0) {
+    recParams.seed_artists = [userArtistIds[0]];
+  }
+
+  let tracks = await spotifyClient.getRecommendations(recParams);
+
+  // If looking for deep cuts, filter by popularity
+  if (isDeepCuts) {
+    tracks = tracks.filter(t => t.popularity < 50);
+  }
+
+  // If we don't have enough tracks, try another seed combination
+  if (tracks.length < (options.trackCount || 25)) {
+    const moreTracks = await spotifyClient.getRecommendations({
+      seed_genres: [genreSeed],
+      limit: 50,
+      max_popularity: isDeepCuts ? 50 : undefined
+    });
+    
+    const existingIds = new Set(tracks.map(t => t.id));
+    tracks.push(...moreTracks.filter(t => !existingIds.has(t.id)));
+  }
+
+  // Sort by a combination of relevance (lower popularity = deeper cut)
+  if (isDeepCuts) {
+    tracks.sort((a, b) => a.popularity - b.popularity);
+  }
+
+  return tracks.slice(0, options.trackCount || 25);
+}
+
 export async function generatePlaylist(options: PlaylistOptions): Promise<{
   tracks: SpotifyTrack[];
   playlistUrl?: string;
@@ -197,6 +372,22 @@ export async function generatePlaylist(options: PlaylistOptions): Promise<{
   // Gather user's listening data for personalization
   const data = await gatherListeningData();
   const tasteProfile = buildTasteProfile(data);
+
+  // Handle special playlist types
+  if (options.blendWith && options.blendWith.length > 0) {
+    const tracks = await generateBlendPlaylist(options, tasteProfile);
+    return finalizePlaylist(options, tracks, 'blend');
+  }
+
+  if (options.birthYear || options.targetYear) {
+    const tracks = await generateTimeMachinePlaylist(options, tasteProfile);
+    return finalizePlaylist(options, tracks, 'timemachine');
+  }
+
+  if (options.genre) {
+    const tracks = await generateGenreDeepDive(options, tasteProfile);
+    return finalizePlaylist(options, tracks, 'genre');
+  }
 
   // Build recommendation parameters
   let recParams: RecommendationParams = {
@@ -355,6 +546,88 @@ export async function generatePlaylist(options: PlaylistOptions): Promise<{
   const user = await spotifyClient.getMe();
   const description = options.description || generateDescription(options, tracks.length);
   
+  const playlist = await spotifyClient.createPlaylist(
+    user.id,
+    playlistName,
+    description,
+    options.public ?? false
+  );
+
+  // Add tracks to playlist
+  await spotifyClient.addTracksToPlaylist(
+    playlist.id,
+    tracks.map(t => t.uri)
+  );
+
+  return {
+    tracks,
+    playlistUrl: playlist.external_urls.spotify,
+    playlistName
+  };
+}
+
+// Helper to finalize and save the playlist
+async function finalizePlaylist(
+  options: PlaylistOptions, 
+  tracks: SpotifyTrack[], 
+  type: 'blend' | 'timemachine' | 'genre' | 'standard'
+): Promise<{
+  tracks: SpotifyTrack[];
+  playlistUrl?: string;
+  playlistName: string;
+}> {
+  // Generate playlist name if not provided
+  let playlistName = options.name;
+  if (!playlistName) {
+    switch (type) {
+      case 'blend':
+        const artists = options.blendWith || [];
+        playlistName = artists.length > 1 
+          ? `Blend: You + ${artists.slice(0, 2).join(' & ')}` 
+          : `Blend: You + ${artists[0]}`;
+        break;
+      case 'timemachine':
+        if (options.birthYear) {
+          const hsYears = `${options.birthYear + 14}-${options.birthYear + 18}`;
+          playlistName = `High School Hits (${hsYears})`;
+        } else {
+          playlistName = `Time Machine: ${options.targetYear}`;
+        }
+        break;
+      case 'genre':
+        playlistName = options.deepCuts !== false
+          ? `${capitalize(options.genre || 'Genre')} Deep Cuts`
+          : `${capitalize(options.genre || 'Genre')} Mix`;
+        break;
+      default:
+        playlistName = 'Generated Playlist';
+    }
+  }
+
+  // Generate description
+  let description = options.description;
+  if (!description) {
+    switch (type) {
+      case 'blend':
+        description = `A blend of your taste with ${options.blendWith?.join(', ')} | Generated by spotify-gen 🎵`;
+        break;
+      case 'timemachine':
+        if (options.birthYear) {
+          description = `Songs from your high school years | Generated by spotify-gen 🎵`;
+        } else {
+          description = `Hits from ${options.targetYear} | Generated by spotify-gen 🎵`;
+        }
+        break;
+      case 'genre':
+        description = `${options.deepCuts !== false ? 'Deep cuts and hidden gems' : 'Great tracks'} in ${options.genre} | Generated by spotify-gen 🎵`;
+        break;
+      default:
+        description = `Generated by spotify-gen 🎵 | ${tracks.length} tracks`;
+    }
+  }
+
+  // Create playlist on Spotify
+  const user = await spotifyClient.getMe();
   const playlist = await spotifyClient.createPlaylist(
     user.id,
     playlistName,

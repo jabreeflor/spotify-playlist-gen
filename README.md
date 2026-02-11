@@ -11,6 +11,9 @@ A smart CLI tool that analyzes your Spotify listening history and creates person
 - **Discovery mode** — Find new music that matches your taste
 - **Similar to** — Create playlists like your favorite artists/tracks
 - **Time-based** — Morning, afternoon, evening, night moods
+- **🆕 Blend** — Combine your taste with 1+ artists into a shared playlist
+- **🆕 Time Machine** — Songs from your high school years (based on birth year)
+- **🆕 Genre Deep Dive** — Find hidden gems and deeper cuts in any genre
 
 ## Installation
 
@@ -151,6 +154,53 @@ spotify-gen playlist time evening
 spotify-gen playlist time night
 ```
 
+#### Blend Playlists
+
+Combine your music taste with one or more artists. Creates a playlist that bridges your listening preferences with the specified artists:
+
+```bash
+# Blend your taste with one artist
+spotify-gen playlist blend "Tame Impala"
+
+# Blend with multiple artists
+spotify-gen playlist blend "Daft Punk" "Justice" "Air"
+
+# More tracks
+spotify-gen playlist blend "Tyler the Creator" "Frank Ocean" --tracks 40
+```
+
+#### Time Machine
+
+Create a nostalgic playlist from your high school years or any specific year:
+
+```bash
+# Songs from your high school years (ages 14-18)
+spotify-gen playlist timemachine --born 1995
+
+# Songs from a specific year
+spotify-gen playlist timemachine --year 2010
+
+# Custom track count
+spotify-gen playlist timemachine --born 2000 --tracks 50
+```
+
+#### Genre Deep Dive
+
+Explore the depths of a genre with hidden gems and lesser-known tracks:
+
+```bash
+# Find deep cuts in a genre (default: obscure tracks)
+spotify-gen playlist genre "indie rock"
+spotify-gen playlist genre "jazz"
+spotify-gen playlist genre "electronic"
+
+# Include popular tracks instead
+spotify-gen playlist genre "hip-hop" --popular
+
+# More tracks
+spotify-gen playlist genre "synthwave" --tracks 40
+```
+
 ### Common Options
 
 All playlist commands support:
@@ -214,6 +264,15 @@ spotify-gen playlist vibe "electronic ambient focus beats for late night coding"
 
 # Similar to multiple influences
 spotify-gen playlist like "artist:The Strokes"
+
+# Blend your taste with favorite artists
+spotify-gen playlist blend "Radiohead" "Thom Yorke" --name "My Radiohead Blend"
+
+# Relive your high school years (born in 1998)
+spotify-gen playlist timemachine --born 1998 --name "High School Memories"
+
+# Deep dive into a genre
+spotify-gen playlist genre "shoegaze" --tracks 30 --name "Shoegaze Deep Cuts"
 ```
 
 ## Configuration

@@ -167,6 +167,81 @@ export function registerPlaylistCommand(program: Command): void {
         public: options.public
       });
     });
+
+  // Blend playlist - combine your taste with artists
+  playlist
+    .command('blend <artists...>')
+    .description('Create a blended playlist combining your taste with specified artists')
+    .option('-t, --tracks <number>', 'Number of tracks', '30')
+    .option('-n, --name <name>', 'Playlist name')
+    .option('--public', 'Make playlist public')
+    .action(async (artists, options) => {
+      console.log(chalk.cyan(`\n🎧 Blending your taste with: ${artists.join(', ')}\n`));
+      
+      await createPlaylist({
+        blendWith: artists,
+        trackCount: parseInt(options.tracks),
+        name: options.name,
+        public: options.public
+      });
+    });
+
+  // Time machine - songs from your high school years
+  playlist
+    .command('timemachine')
+    .description('Generate a playlist from your high school years or a specific year')
+    .option('-b, --born <year>', 'Your birth year (calculates high school years)')
+    .option('-y, --year <year>', 'Specific year to pull songs from')
+    .option('-t, --tracks <number>', 'Number of tracks', '30')
+    .option('-n, --name <name>', 'Playlist name')
+    .option('--public', 'Make playlist public')
+    .action(async (options) => {
+      if (!options.born && !options.year) {
+        console.log(chalk.red('Must specify either --born <year> or --year <year>'));
+        console.log(chalk.dim('\nExamples:'));
+        console.log(chalk.dim('  spotify-gen playlist timemachine --born 1995'));
+        console.log(chalk.dim('  spotify-gen playlist timemachine --year 2010'));
+        process.exit(1);
+      }
+
+      if (options.born) {
+        const birthYear = parseInt(options.born);
+        const hsStart = birthYear + 14;
+        const hsEnd = birthYear + 18;
+        console.log(chalk.cyan(`\n⏰ Time machine: Your high school years (${hsStart}-${hsEnd})\n`));
+      } else {
+        console.log(chalk.cyan(`\n⏰ Time machine: Hits from ${options.year}\n`));
+      }
+
+      await createPlaylist({
+        birthYear: options.born ? parseInt(options.born) : undefined,
+        targetYear: options.year ? parseInt(options.year) : undefined,
+        trackCount: parseInt(options.tracks),
+        name: options.name,
+        public: options.public
+      });
+    });
+
+  // Genre deep dive - find deeper cuts in a genre
+  playlist
+    .command('genre <genre>')
+    .description('Deep dive into a genre - find hidden gems and deeper cuts')
+    .option('-t, --tracks <number>', 'Number of tracks', '25')
+    .option('-n, --name <name>', 'Playlist name')
+    .option('--popular', 'Include popular tracks instead of just deep cuts')
+    .option('--public', 'Make playlist public')
+    .action(async (genre, options) => {
+      const isDeepCuts = !options.popular;
+      console.log(chalk.cyan(`\n🎸 Genre deep dive: ${genre} ${isDeepCuts ? '(hidden gems)' : '(popular tracks)'}\n`));
+
+      await createPlaylist({
+        genre,
+        deepCuts: isDeepCuts,
+        trackCount: parseInt(options.tracks),
+        name: options.name,
+        public: options.public
+      });
+    });
 }
 
 async function createPlaylist(options: PlaylistOptions): Promise<void> {
